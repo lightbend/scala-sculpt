@@ -69,11 +69,28 @@ abstract class ExtractDependencies extends PluginComponent {
     def createFullDependencies(syms: MultiMapIterator, kind: DependencyKind): Seq[FullDependency] = {
       def entitiesFor(s: Symbol) =
         Path(s.ownerChain.reverse.dropWhile(s => s.isEffectiveRoot || s.isEmptyPackage).map(Entity.forSymbol _))
-      (for {
+
+      def fileDepFor(s: Symbol): FullDependency = {
+        val path = Path(Seq(Entity(s.associatedFile.canonicalPath, EntityKind.File)))
+        FullDependency(path, entitiesFor(s), DependencyKind.Declares, 1)
+      }
+      // all the symbols that exist in syms
+      // we must compute this as we walk through the iterator
+      val allSymbols = HashSet.empty[Symbol]
+
+      val nonFileDeps = for {
         (from, tos) <- syms
         fromEntities = entitiesFor(from)
         to <- tos
-      } yield FullDependency(fromEntities, entitiesFor(to), kind, 1)).toSeq
+        _ = (allSymbols += from) += to
+      } yield FullDependency(fromEntities, entitiesFor(to), kind, 1)
+
+      // now create all the file dependencies
+      val fileDeps = allSymbols.iterator.map(fileDepFor)
+      // It is important to exhaust nonFileDeps first since doing so
+      // populates the mutable HashSet. We do this rather than materialize
+      // the MultiMapIterator or do a complex single traversal
+      (nonFileDeps ++ fileDeps).toSeq
     }
   }
 
